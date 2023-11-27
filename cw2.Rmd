@@ -1,0 +1,196 @@
+---
+title: "Coursework 2"
+author: 24525
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+library(knitr)
+library(matlib)
+```
+
+## Regression and its limitations
+
+### Instructions [10 marks]
+
+### Generate data [10 marks]
+
+```{r}
+set.seed(24525) # change 1 to your candidate number
+
+#Simulate a data set, using 100 data points, using 2 predictor variables.
+n <- 100
+x1 <- runif(n, 0, 1)
+x2 <- rnorm(n, 0, 1)
+
+#Simulate a non-linear true CEF
+y_cef <- function(x1, x2) 2*x1^2 + 3*sin(x2) - 4*sqrt(abs(x1*x2)) 
+
+y <- y_cef(x1, x2) + rnorm(n)
+
+```
+
+**Explanation**: We have used set seed for the exact reproducibility. Then simulated 2 predictor variables, which were used to make a non-linear true CEF. The used y to add some noise.
+
+### Linear model is a poor fit [15 marks]
+
+```{r}
+#fitting linear model
+linear_model <- lm(y ~ x1 + x2)
+
+#estimating coefficients using orthogonal projection
+X <- cbind(1, x1, x2)
+y_hat <- X %*% inv(t(X) %*% X) %*% t(X) %*% y
+x_star <- inv(t(X) %*% X) %*% t(X) %*% y
+
+#using svd function
+A <- t(X) %*% X
+duv <- svd(A)
+
+A_inv <- duv$v %*% diag(1/duv$d) %*% t(duv$u)
+X_pseudo_inv <- A_inv %*% t(X)
+svd_coef <- X_pseudo_inv %*% y
+
+#coefficients
+coef_lm <- coef(linear_model)
+
+coef_lm
+x_star
+svd_coef
+
+plot(linear_model) 
+
+
+```
+
+**Explanation**: lm is used to fit a linear regression model. 
+While the second formula is of an orthogonal projection is used to represent the linear regression model. Here x_star shows the least squares solution to the equation y = AX. I installed the matlib library to access the inv() function to solve for matrix inverse. The only difference for the second part is that it uses svd function to help solve for the inverse. The coefficients are exactly the same since all the methods are solving the same problem of least squares solution.
+As for the model being a poor fit, the curved parabola pattern in the residuals vs fitted graph suggests non-linear relationship that was not explained in the model and left out in the residuals.
+
+### Regression coefficient vs causal effect [15 marks]
+
+```{r}
+effect_x1 <- coef(lm(y ~ x1 + x2))['x1']
+
+#Compute the confidence interval
+confint_x1 <- confint(lm(y ~ x1 + x2))['x1', ]
+
+effect_interval <- effect_x1 >= confint_x1[1] && effect_x1 <= confint_x1[2]
+
+effect_x1
+confint_x1
+
+#until the effect lies outside the confidence interval
+if(effect_interval) {
+  y <- y + 25 * x1^2
+}
+
+```
+
+**Explanation**: For the linear model, the estimated causal effect of predictor x1 is given by the regression coefficient for x1 which is associated with the average increase in y given a 1 unit increase in x1 holding x2 fixed. This represents its direct effect, along with the "synergy" effect it has due the interaction term in the CEF. 
+effect_interval checks if the coefficient(which represents the causal effect) lies in the confidence interval.
+The function will keep on modifying the y variable until the causal effect lies outside the confidence interval, making it statistically insignificant.
+
+### A good non-linear model [10 marks]
+
+```{r}
+non_lm <- lm(y ~ poly(x1, 2))
+
+predictions <- predict(non_lm)
+
+ggplot(mapping = aes(x1,y)) + geom_point() + geom_line(aes(x=x1, y=predictions))
+
+plot(non_lm)
+```
+
+**Explanation**: The model uses a quadratic model to predict the relationship. We can see from the graph that changes in x1 predict y really well. 
+Moreover, this model has no distinct pattern in the residual vs fitted graph, suggesting most of the variation is explained by the model. Thus showing that this non-linear model is a good fit.
+
+### Causal relationship vs fitted [10 marks]
+
+```{r}
+x1_new <- x1 + 1
+y_new <- y_cef(x1_new, x2) + rnorm(n)
+mean(y_new - y)
+
+qplot(x1, y_new - y, geom=c("smooth", "point")) + geom_hline(yintercept = mean(y_new - y))
+
+#Confounded relationship effect
+x2_new <- 3 - 2*x1_new + rnorm(n)
+y_new2 <- y_cef(x1_new, x2_new) + rnorm(n)
+mean(y_new2 - y)
+qplot(x1, y_new2 - y, geom=c("smooth", "point")) + geom_hline(yintercept = mean(y_new2 - y))
+qplot(x2, y_new2 - y, geom=c("smooth", "point")) + geom_hline(yintercept = mean(y_new2 - y))
+
+```
+
+**Explanation**: x1_new has the increased predictor variable, and then the mean of the difference in the change in the dependent variable y shows the CATE (conditional average treatment effect) However, from the first graph that the change in x1 does not show that causal effect.
+For the second part, x1_new effects both x2_new and the dependent variable, while x2_new also has an effect on the dependent variable. The effect of this when changing the variables is shown in the respective graphs.
+
+
+### A bad non-linear model [10 marks]
+
+```{r}
+complex_non_lm <- lm(y~ poly(x1,20) + poly(x2, 19))
+
+
+x1_test = runif(n, 0,1)
+x2_test = rnorm(n, 0,1)
+
+y_test <- y_cef(x1_test, x2_test) + rnorm(n)
+
+predictions_complex <- predict(complex_non_lm, newdata = data.frame(x1 = x1_test, x2 = x2_test))
+
+rmse <- sqrt(mean((predictions_complex - y_test)^2))
+
+cat("The square root mean squared error for the complex model is:",rmse, "\n")
+
+rmse_non_linear <- sqrt(mean((predictions - y_test)^2))
+
+cat("The square root mean squared error for the linear model is:", rmse_non_linear, "\n")
+
+```
+
+**Explanation**: Used a over fitting polynomial model, with degrees 20. 
+After running the test, calculating and comparing the RMSE which is a good metric to measure the prediction accuracy of the model. 
+The RMSE for the complex model is extremely high, showing that the model is not accurate at all, a significantly worse prediction accuracy compared to the simpler non-linear model.
+
+### Open-ended question [20 marks]
+
+Using your knowledge about KNN Clustering, and the ISLR textbook, set up a KNN classification model using a dataset of your choice and evaluate its accuracy. Additionally explain what a confusion matrix is. [10 marks]
+
+```{r}
+library(class)
+
+data("iris")
+str(iris)
+
+X_features <- iris[, 1:4]
+Species <- iris$Species
+
+set.seed(24525)
+
+index <- sample(1:nrow(iris), nrow(iris)*0.7)
+
+X_train <- X_features[index, ] 
+X_test <- X_features[-index, ]
+Y_train <- Species[index]
+Y_test <- Species[-index]
+
+k <- 3 
+knn_model <- knn(train = X_train, test = X_test, cl = Y_train, k=k )
+
+accuracy <- mean(knn_model == Y_test) 
+
+cat("Accuracy: ", accuracy, "\n")
+
+conf_matrix <- table(Actual = Y_test, Predicted = knn_model)
+print(conf_matrix)
+```
+
+**Explanation**: A confusion matrix is a table that is often used to evaluate the performance of a classification model. It provides a summary of the predicted and actual classifications of a classification algorithm. The confusion matrix is particularly useful for understanding the quality of predictions for binary and multiclass classification problems.
+
+
